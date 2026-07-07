@@ -155,7 +155,7 @@ function __schedulePush(){
 async function __pushNow(){
   if(!__currentUser) return;
   try{
-    await __db.collection('users').doc(__currentUser.uid).collection('apps').doc(__APP_ID).set(__collectLocalSnapshot());
+    await __db.collection('users').doc(__currentUser.uid).collection('apps').doc(__APP_ID).set(__collectLocalSnapshot(), {merge:true});
   }catch(e){ console.warn('sync push failed', e); }
 }
 const __origSetItem = Storage.prototype.setItem.bind(localStorage);
