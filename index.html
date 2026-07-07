@@ -114,8 +114,106 @@
   .toast{position:fixed;bottom:90px;left:50%;transform:translateX(-50%);background:var(--text);color:#F7F4EF;padding:9px 18px;border-radius:100px;font-size:.78rem;font-weight:500;opacity:0;transition:opacity .3s;pointer-events:none;z-index:999;white-space:nowrap}
   .toast.show{opacity:1}
 </style>
+<script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore-compat.js"></script>
+<script>
+// ===== Sincronização na nuvem (conta única Livro-Caixa) =====
+const __firebaseConfig = {
+  apiKey: "AIzaSyDAoPv4qk8RHjhq6QFn5voIAFbMtzzwPYc",
+  authDomain: "livro-caixa-63f4a.firebaseapp.com",
+  projectId: "livro-caixa-63f4a",
+  storageBucket: "livro-caixa-63f4a.firebasestorage.app",
+  messagingSenderId: "524566546588",
+  appId: "1:524566546588:web:e9666674336e2f68d6c559"
+};
+firebase.initializeApp(__firebaseConfig);
+const __auth = firebase.auth();
+const __db = firebase.firestore();
+__db.enablePersistence().catch(()=>{});
+
+const __APP_ID = "metas2026";
+const __KEY_PREFIXES = ["metas2026_v3"];
+
+function __keyMatches(k){
+  return __KEY_PREFIXES.some(p => k === p || k.indexOf(p) === 0);
+}
+function __collectLocalSnapshot(){
+  const snap = {};
+  for(let i=0;i<localStorage.length;i++){
+    const k = localStorage.key(i);
+    if(__keyMatches(k)) snap[k] = localStorage.getItem(k);
+  }
+  return snap;
+}
+let __currentUser = null;
+let __pushTimer = null;
+function __schedulePush(){
+  clearTimeout(__pushTimer);
+  __pushTimer = setTimeout(__pushNow, 900);
+}
+async function __pushNow(){
+  if(!__currentUser) return;
+  try{
+    await __db.collection('users').doc(__currentUser.uid).collection('apps').doc(__APP_ID).set(__collectLocalSnapshot());
+  }catch(e){ console.warn('sync push failed', e); }
+}
+const __origSetItem = Storage.prototype.setItem.bind(localStorage);
+const __origRemoveItem = Storage.prototype.removeItem.bind(localStorage);
+localStorage.setItem = function(k,v){ __origSetItem(k,v); if(__keyMatches(k)) __schedulePush(); };
+localStorage.removeItem = function(k){ __origRemoveItem(k); if(__keyMatches(k)) __schedulePush(); };
+
+async function __hydrateFromCloud(){
+  try{
+    const doc = await __db.collection('users').doc(__currentUser.uid).collection('apps').doc(__APP_ID).get();
+    if(doc.exists){
+      const data = doc.data();
+      Object.keys(data).forEach(k=>{ __origSetItem(k, data[k]); });
+    }
+  }catch(e){ console.warn('sync hydrate failed', e); }
+}
+
+function __bootApp(){
+  const tpl = document.getElementById('__appTemplate');
+  const frag = tpl.content.cloneNode(true);
+  const scripts = Array.from(frag.querySelectorAll('script'));
+  scripts.forEach(s=>s.remove());
+  document.body.appendChild(frag);
+  scripts.forEach(old=>{
+    const s = document.createElement('script');
+    if(old.src){ s.src = old.src; } else { s.textContent = old.textContent; }
+    document.body.appendChild(s);
+  });
+}
+</script>
+
 </head>
 <body>
+<div id="__authOverlay" style="position:fixed;inset:0;background:#F3F5F2;z-index:99999;display:flex;align-items:center;justify-content:center;padding:24px;font-family:-apple-system,'Inter',sans-serif;">
+  <div style="width:100%;max-width:360px;">
+    <div style="text-align:center;margin-bottom:22px;">
+      <div style="font-size:22px;font-weight:700;color:#1F4038;">Metas 2026</div>
+      <div style="font-size:12.5px;color:#6B7A73;margin-top:4px;">Entre com a conta do Livro-Caixa</div>
+    </div>
+    <div style="display:flex;gap:8px;margin-bottom:16px;">
+      <div id="__tabLogin" style="flex:1;text-align:center;padding:10px;border-radius:10px;background:#1F4038;color:#fff;font-weight:700;font-size:13.5px;cursor:pointer;">Entrar</div>
+      <div id="__tabSignup" style="flex:1;text-align:center;padding:10px;border-radius:10px;background:#EAEDE9;color:#6B7A73;font-weight:700;font-size:13.5px;cursor:pointer;">Criar conta</div>
+    </div>
+    <div id="__authError" style="background:#FBEAE6;color:#B5493A;font-size:12.5px;padding:9px 12px;border-radius:9px;margin-bottom:12px;display:none;"></div>
+    <div style="margin-bottom:12px;">
+      <label style="display:block;font-size:12px;color:#6B7A73;margin-bottom:5px;font-weight:600;">E-mail</label>
+      <input type="email" id="__authEmail" autocomplete="username" placeholder="voce@email.com" style="width:100%;padding:11px 12px;border:1.5px solid #DDE3DD;border-radius:10px;font-size:15px;background:#FCFCFB;box-sizing:border-box;">
+    </div>
+    <div style="margin-bottom:12px;">
+      <label style="display:block;font-size:12px;color:#6B7A73;margin-bottom:5px;font-weight:600;">Senha</label>
+      <input type="password" id="__authPass" autocomplete="current-password" placeholder="Mínimo 6 caracteres" style="width:100%;padding:11px 12px;border:1.5px solid #DDE3DD;border-radius:10px;font-size:15px;background:#FCFCFB;box-sizing:border-box;">
+    </div>
+    <button id="__authSubmit" style="width:100%;padding:13px;border-radius:11px;border:none;font-weight:700;font-size:14.5px;background:#2F5D50;color:#fff;cursor:pointer;">Entrar</button>
+  </div>
+</div>
+<button id="__logoutBtn" style="display:none;position:fixed;top:10px;right:10px;z-index:99998;background:#1F4038;color:#fff;border:none;font-size:11px;padding:7px 12px;border-radius:8px;font-weight:600;cursor:pointer;">Sair</button>
+
+<template id="__appTemplate">
 
 <header>
   <div class="header-row">
@@ -406,5 +504,66 @@ document.getElementById('modal-save').addEventListener('click',()=>{
 
 loadState();updateCountdown();render();
 </script>
+</template>
+<script>
+let __authMode = 'login';
+document.getElementById('__tabLogin').onclick = ()=>{
+  __authMode='login';
+  document.getElementById('__tabLogin').style.background='#1F4038';document.getElementById('__tabLogin').style.color='#fff';
+  document.getElementById('__tabSignup').style.background='#EAEDE9';document.getElementById('__tabSignup').style.color='#6B7A73';
+  document.getElementById('__authSubmit').textContent='Entrar';
+  document.getElementById('__authError').style.display='none';
+};
+document.getElementById('__tabSignup').onclick = ()=>{
+  __authMode='signup';
+  document.getElementById('__tabSignup').style.background='#1F4038';document.getElementById('__tabSignup').style.color='#fff';
+  document.getElementById('__tabLogin').style.background='#EAEDE9';document.getElementById('__tabLogin').style.color='#6B7A73';
+  document.getElementById('__authSubmit').textContent='Criar conta';
+  document.getElementById('__authError').style.display='none';
+};
+function __authErrorMsg(code){
+  const map = {
+    'auth/invalid-email':'E-mail inválido.',
+    'auth/user-not-found':'Não existe conta com esse e-mail.',
+    'auth/wrong-password':'Senha incorreta.',
+    'auth/invalid-credential':'E-mail ou senha incorretos.',
+    'auth/email-already-in-use':'Já existe uma conta com esse e-mail. Toque em "Entrar".',
+    'auth/weak-password':'A senha precisa ter pelo menos 6 caracteres.',
+    'auth/network-request-failed':'Sem conexão com a internet.'
+  };
+  return map[code] || ('Não foi possível continuar (código: ' + (code||'desconhecido') + ').');
+}
+document.getElementById('__authSubmit').onclick = async ()=>{
+  const email = document.getElementById('__authEmail').value.trim();
+  const pass = document.getElementById('__authPass').value;
+  const errEl = document.getElementById('__authError');
+  errEl.style.display='none';
+  if(!email || !pass){ errEl.textContent='Preencha e-mail e senha.'; errEl.style.display='block'; return; }
+  try{
+    if(__authMode==='signup') await __auth.createUserWithEmailAndPassword(email, pass);
+    else await __auth.signInWithEmailAndPassword(email, pass);
+  }catch(e){
+    errEl.textContent = __authErrorMsg(e.code);
+    errEl.style.display='block';
+  }
+};
+document.getElementById('__logoutBtn').onclick = ()=>{ __auth.signOut(); location.reload(); };
+
+let __booted = false;
+__auth.onAuthStateChanged(async user=>{
+  if(user){
+    __currentUser = user;
+    await __hydrateFromCloud();
+    document.getElementById('__authOverlay').style.display='none';
+    document.getElementById('__logoutBtn').style.display='block';
+    if(!__booted){ __booted = true; __bootApp(); }
+  } else {
+    __currentUser = null;
+    document.getElementById('__authOverlay').style.display='flex';
+    document.getElementById('__logoutBtn').style.display='none';
+  }
+});
+</script>
+
 </body>
 </html>
