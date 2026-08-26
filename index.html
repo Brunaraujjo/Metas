@@ -294,6 +294,25 @@ function __bootApp(){
   </div>
 </div>
 
+<div class="modal-overlay" id="edit-modal">
+  <div class="modal">
+    <div class="modal-handle"></div>
+    <h2>Editar prazo ✏️</h2>
+    <div class="field">
+      <label>Meta</label>
+      <div id="edit-title-label" style="font-size:.9rem;font-weight:600;padding:2px 0 4px;"></div>
+    </div>
+    <div class="field">
+      <label>Etiqueta / prazo</label>
+      <input type="text" id="edit-tag-input" placeholder="Ex: até Dez/26, contínuo…" maxlength="40"/>
+    </div>
+    <div class="modal-actions">
+      <button class="btn-cancel" id="edit-modal-cancel">Cancelar</button>
+      <button class="btn-primary" id="edit-modal-save">Salvar</button>
+    </div>
+  </div>
+</div>
+
 <div class="toast" id="toast"></div>
 
 <!-- PWA MANIFEST inline via JS -->
@@ -368,17 +387,17 @@ const BASE_GOALS = [
   {id:'proj2',cat:'projetos',title:'Estudar 1h por semana (ao menos)',type:'monthly',tag:'monthly',tagLabel:'Jul → Dez',months:[6,7,8,9,10,11]},
 ];
 
-let GOALS=[], state={};
+let GOALS=[], state={}, deletedBase=[];
 function loadState(){
   try{
     const raw=localStorage.getItem('metas2026_v3');
-    if(raw){const s=JSON.parse(raw);GOALS=s.goals;state=s.state;
-      BASE_GOALS.forEach(bg=>{if(!GOALS.find(g=>g.id===bg.id)){GOALS.unshift(bg);state[bg.id]=initS(bg);}});return;}
+    if(raw){const s=JSON.parse(raw);GOALS=s.goals;state=s.state;deletedBase=s.deletedBase||[];
+      BASE_GOALS.forEach(bg=>{if(!GOALS.find(g=>g.id===bg.id)&&!deletedBase.includes(bg.id)){GOALS.unshift(bg);state[bg.id]=initS(bg);}});return;}
   }catch(e){}
   GOALS=BASE_GOALS.map(g=>({...g}));state={};GOALS.forEach(g=>{state[g.id]=initS(g);});
 }
 function initS(g){return{checked:false,pct:0,done:0,activeMonths:[],notes:'',notesOpen:false};}
-function save(){localStorage.setItem('metas2026_v3',JSON.stringify({goals:GOALS,state}));}
+function save(){localStorage.setItem('metas2026_v3',JSON.stringify({goals:GOALS,state,deletedBase}));}
 function calcDone(g){const s=state[g.id];if(!s)return 0;
   if(g.type==='check')return s.checked?1:0;if(g.type==='monthly')return s.activeMonths.length>=(g.months||[]).length?1:0;
   if(g.type==='progress')return s.pct>=100?1:0;if(g.type==='steps')return s.done>=g.total?1:0;return 0;}
@@ -437,14 +456,15 @@ function card(g){
     }).join('')}</div></div>`;}
   const notes=`<div class="card-notes ${s.notesOpen?'open':''}" id="notes-${g.id}">
     <textarea placeholder="Anotações…" data-action="note" data-id="${g.id}">${s.notes}</textarea></div>`;
-  const del=isCustom?`<button class="btn-sm btn-delete" data-action="delete" data-id="${g.id}">🗑 Excluir</button>`:'';
+  const del=`<button class="btn-sm btn-delete" data-action="delete" data-id="${g.id}">🗑 Excluir</button>`;
+  const editTag=`<button class="btn-sm" data-action="edit-tag" data-id="${g.id}">✏️ Prazo</button>`;
   return`<div class="card ${isDone?'done':''}" id="card-${g.id}">
     <div class="card-top">${chk}<div class="card-body">
       <div class="card-title">${g.title}</div>
       <div class="card-meta"><span class="tag ${tc}">${g.tagLabel||''}</span>${isDone?'<span class="tag tag-done">✓ Concluída</span>':''}</div>
     </div></div>${prog}${mon}${notes}
     <div class="card-actions">
-      <button class="btn-sm ${s.notesOpen?'active':''}" data-action="toggle-notes" data-id="${g.id}">📝 Notas</button>${del}
+      <button class="btn-sm ${s.notesOpen?'active':''}" data-action="toggle-notes" data-id="${g.id}">📝 Notas</button>${editTag}${del}
     </div></div>`;}
 
 function bind(){
@@ -475,9 +495,31 @@ function act(e){
     else{s.activeMonths.push(m);toast(`✓ ${MN[m]} marcado!`);}}
   if(action==='toggle-notes'){s.notesOpen=!s.notesOpen;save();render();return;}
   if(action==='note'){s.notes=el.value;save();return;}
-  if(action==='delete'){if(confirm('Excluir esta meta?')){GOALS=GOALS.filter(g=>g.id!==id);delete state[id];save();render();toast('Meta removida.');}return;}
+  if(action==='delete'){if(confirm('Excluir esta meta? Essa ação não pode ser desfeita.')){GOALS=GOALS.filter(g=>g.id!==id);delete state[id];if(!deletedBase.includes(id))deletedBase.push(id);save();render();toast('Meta removida.');}return;}
+  if(action==='edit-tag'){openEditModal(id);return;}
   save();render();
 }
+
+// EDIT DEADLINE/TAG MODAL
+const editModal=document.getElementById('edit-modal');
+let __editId=null;
+function openEditModal(id){
+  const g=GOALS.find(x=>x.id===id);if(!g)return;
+  __editId=id;
+  document.getElementById('edit-title-label').textContent=g.title;
+  document.getElementById('edit-tag-input').value=g.tagLabel||'';
+  editModal.classList.add('open');
+  setTimeout(()=>document.getElementById('edit-tag-input').focus(),320);
+}
+document.getElementById('edit-modal-cancel').addEventListener('click',()=>editModal.classList.remove('open'));
+editModal.addEventListener('click',e=>{if(e.target===editModal)editModal.classList.remove('open');});
+document.getElementById('edit-modal-save').addEventListener('click',()=>{
+  if(!__editId)return;
+  const g=GOALS.find(x=>x.id===__editId);if(!g){editModal.classList.remove('open');return;}
+  const newTag=document.getElementById('edit-tag-input').value.trim();
+  g.tagLabel=newTag||'sem prazo definido';
+  save();editModal.classList.remove('open');render();toast('📅 Prazo atualizado!');
+});
 
 // MODAL
 const modal=document.getElementById('modal');
